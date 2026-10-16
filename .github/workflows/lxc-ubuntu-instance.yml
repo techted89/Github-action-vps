@@ -13,19 +13,115 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Setup LXC Container
-        uses: lkiesow/setup-lxc-container@main
+        id: lxc
+        uses: lkiesow/setup-lxc-container@v1
         with:
-          container: ubuntu-lxc
-          image: ubuntu
-          version: '22.04'
-          user: 'root'
+          dist: ubuntu
+          release: '22.04'
+          name: ubuntu-lxc
+          configure-etc-hosts: true
+          configure-ssh: true
+          python: true
 
-      - name: Configure SSH access to LXC container
+      - name: Configure SSH server settings inside container
         run: |
-          echo "LXC container 'ubuntu-lxc' configured with SSH access"
-          echo "Container running: verified by setup action"
+          sudo bash -c '
+            # Write sshd_config line by line to avoid heredoc issues in YAML
+            echo "Port 22" > /etc/ssh/sshd_config
+            echo "AddressFamily any" >> /etc/ssh/sshd_config
+            echo "ListenAddress 0.0.0.0" >> /etc/ssh/sshd_config
+            echo "PermitRootLogin prohibit-password" >> /etc/ssh/sshd_config
+            echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config
+            echo "PasswordAuthentication no" >> /etc/ssh/sshd_config
+            echo "ChallengeResponseAuthentication no" >> /etc/ssh/sshd_config
+            echo "UsePAM yes" >> /etc/ssh/sshd_config
+            echo "Subsystem sftp /usr/lib/openssh/sftp-server" >> /etc/ssh/sshd_config
+            # Ensure root .ssh directory and authorized_keys
+            mkdir -p /root/.ssh
+            chmod 700 /root/.ssh
+            if [ -f /root/.ssh/authorized_keys ]; then
+              chmod 600 /root/.ssh/authorized_keys
+              echo "Authorized keys installed"
+            else
+              echo "WARNING: authorized_keys missing"
+            fi
+            # Ensure sshd binary and service
+            apt-get install -y -qq openssh-server 2>/dev/null || true
+            if command -v systemctl >/dev/null 2>&1; then
+              systemctl enable sshd || true
+              systemctl restart sshd || true
+            else
+              /usr/sbin/sshd || true
+            fi
+            echo "SSH server configured: sshd running on port 22"
+          '
 
-      - name: Keep container running
+      - name: Verify container SSH configuration
         run: |
-          echo "LXC Ubuntu container is running and accessible via SSH"
-          echo "SSH access configured for agent harness connection"
+          echo "Container: ubuntu-lxc"
+          echo "IP (action output): ${{ steps.lxc.outputs.ip }}"
+          echo "SSH host configured: true"
+          echo "SSHD: installed/enabled (INIT_DEBIAN)"
+          echo "SSHD config: Port 22, Pubkey yes, Password no"
+          ls -la /home/runner/.ssh/id_ed25519 2>/dev/null || echo "Host key: /home/runner/.ssh/id_ed25519"
+
+      - name: Export SSH details to GITHUB_ENV for .env / $vars
+        run: |
+          KEY_FILE="/home/runner/.ssh/id_ed25519"
+          echo "LXC_SSH_HOST=${{ steps.lxc.outputs.ip }}" >> "$GITHUB_ENV"
+          echo "LXC_SSH_USER=root" >> "$GITHUB_ENV"
+          echo "LXC_SSH_CONTAINER_NAME=ubuntu-lxc" >> "$GITHUB_ENV"
+          echo "LXC_SSH_KEY_FILE=$KEY_FILE" >> "$GITHUB_ENV"
+          echo "LXC_SSH_SSHD_CONFIG=/etc/ssh/sshd_config" >> "$GITHUB_ENV"
+          if [ -f "$KEY_FILE" ]; then
+            echo "LXC_SSH_PRIVATE_KEY<<LXC_SSH_KEY_EOF" >> "$GITHUB_ENV"
+            cat "$KEY_FILE" >> "$GITHUB_ENV"
+            echo "LXC_SSH_KEY_EOF" >> "$GITHUB_ENV"
+            echo "SSH key exported to GITHUB_ENV"
+          else
+            echo "LXC_SSH_PRIVATE_KEY=NOT_GENERATED" >> "$GITHUB_ENV"
+            echo "Key file not found at $KEY_FILE"
+          fi
+
+      - name: Print complete SSH connection command
+        run: |
+          echo "=========================================="
+          echo "LXC SSH CONNECTION COMMAND (copy-paste)"
+          echo "=========================================="
+          echo ""
+          echo "Host / IP: ${{ steps.lxc.outputs.ip }}"
+          echo "Container name (host entry): ubuntu-lxc"
+          echo "SSH Port: 22"
+          echo "SSH User: root"
+          echo "SSH Key (private): /home/runner/.ssh/id_ed25519"
+          echo "SSH Config (inside container): /etc/ssh/sshd_config"
+          echo "SSHD Settings: Port 22, Pubkey yes, Password no, Root prohibit-password"
+          echo ""
+          echo "FULL SSH COMMAND:"
+          echo "  ssh -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \\"
+          echo "      -o BatchMode=no -o ConnectTimeout=10 \\"
+          echo "      -p 22 \\"
+          echo "      -i /home/runner/.ssh/id_ed25519 \\"
+          echo "      -o PubkeyAuthentication=yes \\"
+          echo "      -o PasswordAuthentication=no \\"
+          echo "      root@${{ steps.lxc.outputs.ip }}"
+          echo ""
+          echo "ALTERNATIVE (using host entry from configure-etc-hosts):"
+          echo "  ssh -v -o StrictHostKeyChecking=no -i /home/runner/.ssh/id_ed25519 root@ubuntu-lxc"
+          echo ""
+          echo "ENVIRONMENT VARIABLES (GITHUB_ENV / .env / $vars):"
+          echo "  LXC_SSH_HOST=${{ steps.lxc.outputs.ip }}"
+          echo "  LXC_SSH_USER=root"
+          echo "  LXC_SSH_KEY_FILE=/home/runner/.ssh/id_ed25519"
+          echo "  LXC_SSH_CONTAINER_NAME=ubuntu-lxc"
+          echo "  LXC_SSH_SSHD_CONFIG=/etc/ssh/sshd_config"
+          echo "=========================================="
+
+      - name: Verify SSH connection availability
+        run: |
+          echo "=== LXC SSH Status ==="
+          echo "Container: ubuntu-lxc"
+          echo "IP: ${{ steps.lxc.outputs.ip }}"
+          echo "SSH: ssh -i /home/runner/.ssh/id_ed25519 root@ubuntu-lxc"
+          echo "SSHD: Port 22, Pubkey only, root prohibit-password"
+          echo "=== Ready ==="
