@@ -17,7 +17,7 @@ jobs:
         uses: lkiesow/setup-lxc-container@v1
         with:
           dist: ubuntu
-          release: '22.04'
+          release: noble
           name: ubuntu-lxc
           configure-etc-hosts: true
           configure-ssh: true
