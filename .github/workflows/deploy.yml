@@ -1,0 +1,44 @@
+name: Remote SSH Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up SSH Private Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/github_actions_vps
+          chmod 600 ~/.ssh/github_actions_vps
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Execute Remote SSH Commands via appleboy/ssh-action
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            set -e
+            if [ -d "/var/www/my-app/.git" ]; then
+              cd /var/www/my-app
+              git pull origin main
+            else
+              mkdir -p /var/www/my-app
+              git clone https://github.com/techted89/my-app.git /var/www/my-app
+              cd /var/www/my-app
+            fi
+            npm install --production
+            if command -v pm2 >/dev/null 2>&1; then
+              pm2 restart all || pm2 start index.js --name "my-app"
+            else
+              echo "[!] PM2 not found, skipping process restart."
+            fi
