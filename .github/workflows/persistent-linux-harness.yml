@@ -8,15 +8,15 @@ on:
       ssh_host:
         description: 'SSH host for remote Linux instance'
         required: true
-        default: '${{ secrets.SSH_HOST }}'
+        default: ''
       ssh_user:
         description: 'SSH username'
         required: true
-        default: '${{ secrets.SSH_USERNAME }}'
+        default: ''
       ssh_key:
         description: 'SSH private key (base64 or raw)'
         required: true
-        default: '${{ secrets.SSH_PRIVATE_KEY }}'
+        default: ''
 
 env:
   # Secure env bindings: no embedded secrets in committed workflow file
